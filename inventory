@@ -1,0 +1,11 @@
+[db]
+db ansible_host=10.0.2.5 ansible_password=ansible
+
+[db_repl]
+db_repl ansible_host=10.0.2.6 ansible_password=ansible
+
+[telegram_bot]
+bot ansible_host=10.0.2.7 ansible_password=ansible
+
+[all:vars]
+ansible_user=ansible
