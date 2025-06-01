@@ -1,0 +1,93 @@
+services:
+  bot:
+    image: devops/bot
+    build: bot
+    env_file:
+      - .env
+    container_name: devops_bot
+    depends_on:
+      database:
+        condition: service_healthy
+      database_repl:
+        condition: service_healthy
+    networks:
+      - application
+
+  database:
+    image: devops/db
+    build: db
+    env_file:
+      - .env
+    environment:
+      - PGPORT=${DB_PORT}
+      - POSTGRES_DB=${DB_DATABASE}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS="--encoding=UTF-8"
+    container_name: devops_database
+    healthcheck:
+      test: "pg_isready -U ${DB_USER} -d ${DB_DATABASE}"
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    command: -c wal_level=replica -c max_wal_senders=10 -c max_replication_slots=10 -c hot_standby=on -c hot_standby_feedback=on -c logging_collector=on -c log_replication_commands=on -c log_line_prefix='%m [%p] %u '
+    networks:
+      - application
+    volumes:
+      - devops_database-data:/var/lib/postgresql/data
+      - ./db/postgresql.conf:/etc/postgresql/postgresql.conf
+
+  database_repl:
+    image: devops/db_repl
+    build:
+      context: db_repl
+      dockerfile: ./Dockerfile
+      args:
+        DB_HOST: ${DB_HOST}
+        DB_PORT: ${DB_PORT}
+        DB_REPL_USER: ${DB_REPL_USER}
+    env_file:
+      - .env
+    environment:
+      - PGPORT=${DB_REPL_PORT}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_DB=${DB_DATABASE}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS="--encoding=UTF-8"
+    container_name: devops_database_repl
+    healthcheck:
+      test: "pg_isready -U ${DB_USER} -d ${DB_DATABASE}"
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      database:
+        condition: service_healthy
+    command: |
+      bash -c "
+      rm -rf /var/lib/postgresql/data/*
+      until pg_basebackup -D /var/lib/postgresql/data/ -S replication_slot -X stream -P -Fp -h ${DB_HOST} -p ${DB_PORT} -U ${DB_REPL_USER} -R
+      do
+      echo 'Waiting for primary to connect...'
+      sleep 1s
+      done
+      echo 'Backup done, starting replica...'
+      chown -R postgres:postgres /var/lib/postgresql/data/
+      chmod -R 0700 /var/lib/postgresql/data/
+      su postgres -c "postgres"
+      "
+    networks:
+      - application
+    volumes:
+      - devops_database_repl-data:/var/lib/postgresql/data
+
+networks:
+  application:
+    driver: bridge
+    attachable: false
+
+volumes:
+  devops_database-data:
+  devops_database_repl-data:
